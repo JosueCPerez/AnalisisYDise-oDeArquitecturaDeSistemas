@@ -134,7 +134,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref LatestAmiId
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnetA
       SecurityGroupIds:
@@ -219,7 +219,7 @@ Resources:
               <div class="server-name">Servidor A</div>
               <div class="info"><strong>Subnet:</strong> PublicSubnetA &mdash; <strong>AZ:</strong> Zona 1</div>
               <div class="tags">
-                <span class="tag">t2.micro</span>
+                <span class="tag">t3.micro</span>
                 <span class="tag">Amazon Linux 2023</span>
                 <span class="tag">NGINX</span>
                 <span class="tag">Alta Disponibilidad</span>
@@ -236,7 +236,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref LatestAmiId
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnetB
       SecurityGroupIds:
@@ -321,7 +321,7 @@ Resources:
               <div class="server-name">Servidor B</div>
               <div class="info"><strong>Subnet:</strong> PublicSubnetB &mdash; <strong>AZ:</strong> Zona 2</div>
               <div class="tags">
-                <span class="tag">t2.micro</span>
+                <span class="tag">t3.micro</span>
                 <span class="tag">Amazon Linux 2023</span>
                 <span class="tag">NGINX</span>
                 <span class="tag">Alta Disponibilidad</span>
@@ -338,7 +338,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref LatestAmiId
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnetA
       SecurityGroupIds:
@@ -423,7 +423,7 @@ Resources:
               <div class="server-name">Servidor C</div>
               <div class="info"><strong>Subnet:</strong> PublicSubnetA &mdash; <strong>AZ:</strong> Zona 1</div>
               <div class="tags">
-                <span class="tag">t2.micro</span>
+                <span class="tag">t3.micro</span>
                 <span class="tag">Amazon Linux 2023</span>
                 <span class="tag">NGINX</span>
                 <span class="tag">Alta Disponibilidad</span>
@@ -440,7 +440,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref LatestAmiId
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnetB
       SecurityGroupIds:
@@ -525,7 +525,7 @@ Resources:
               <div class="server-name">Servidor D</div>
               <div class="info"><strong>Subnet:</strong> PublicSubnetB &mdash; <strong>AZ:</strong> Zona 2</div>
               <div class="tags">
-                <span class="tag">t2.micro</span>
+                <span class="tag">t3.micro</span>
                 <span class="tag">Amazon Linux 2023</span>
                 <span class="tag">NGINX</span>
                 <span class="tag">Alta Disponibilidad</span>
@@ -542,7 +542,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref LatestAmiId
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnetA
       SecurityGroupIds:
@@ -627,7 +627,7 @@ Resources:
               <div class="server-name">Servidor E</div>
               <div class="info"><strong>Subnet:</strong> PublicSubnetA &mdash; <strong>AZ:</strong> Zona 1</div>
               <div class="tags">
-                <span class="tag">t2.micro</span>
+                <span class="tag">t3.micro</span>
                 <span class="tag">Amazon Linux 2023</span>
                 <span class="tag">NGINX</span>
                 <span class="tag">Alta Disponibilidad</span>
