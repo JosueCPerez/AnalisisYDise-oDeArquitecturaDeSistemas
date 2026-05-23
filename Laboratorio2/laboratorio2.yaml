@@ -1,0 +1,726 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Laboratorio 2 - Infraestructura en Alta Disponibilidad con NGINX usando AWS CloudFormation"
+
+Parameters:
+  KeyName:
+    Description: "Nombre del KeyPair SSH existente"
+    Type: AWS::EC2::KeyPair::KeyName
+
+  LatestAmiId:
+    Description: "AMI Amazon Linux 2023 (ultima version automatica via SSM)"
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+
+  # ─── RED ──────────────────────────────────────────────────────────────────
+
+  LabVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: LabAltaDisponibilidadVPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: LabAltaDisponibilidadIGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref LabVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref LabVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnetA
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref LabVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnetB
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref LabVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # ─── SEGURIDAD ────────────────────────────────────────────────────────────
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Permite trafico HTTP publico hacia el Load Balancer"
+      VpcId: !Ref LabVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: LoadBalancerSecurityGroup
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Permite HTTP desde el Load Balancer y SSH desde Internet"
+      VpcId: !Ref LabVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: WebServerSecurityGroup
+
+  # ─── INSTANCIAS EC2 ───────────────────────────────────────────────────────
+
+  WebServerA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: WebServerA-NGINX
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          dnf update -y
+          dnf install -y nginx
+          systemctl enable nginx
+          systemctl start nginx
+          cat > /usr/share/nginx/html/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Alta Disponibilidad - Servidor A</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .card {
+                background: white;
+                border-radius: 16px;
+                padding: 48px;
+                max-width: 560px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+              }
+              .badge {
+                background: #1a237e;
+                color: white;
+                padding: 6px 20px;
+                border-radius: 20px;
+                font-size: 13px;
+                display: inline-block;
+                margin-bottom: 24px;
+              }
+              h1 { color: #1a237e; font-size: 22px; margin-bottom: 12px; }
+              .server-name {
+                font-size: 52px;
+                font-weight: bold;
+                color: #3949ab;
+                margin: 16px 0;
+              }
+              .info { color: #444; margin: 8px 0; font-size: 15px; }
+              .tags { margin-top: 20px; }
+              .tag {
+                background: #e8eaf6;
+                color: #3949ab;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-size: 13px;
+                display: inline-block;
+                margin: 3px;
+              }
+              .footer {
+                margin-top: 32px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                color: #888;
+                font-size: 13px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">AWS CloudFormation</div>
+              <h1>Laboratorio de Alta Disponibilidad con NGINX</h1>
+              <div class="server-name">Servidor A</div>
+              <div class="info"><strong>Subnet:</strong> PublicSubnetA &mdash; <strong>AZ:</strong> Zona 1</div>
+              <div class="tags">
+                <span class="tag">t2.micro</span>
+                <span class="tag">Amazon Linux 2023</span>
+                <span class="tag">NGINX</span>
+                <span class="tag">Alta Disponibilidad</span>
+              </div>
+              <div class="footer">
+                Josue Perez &bull; Análisis y Diseño de Arquitecturas de Sistemas
+              </div>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+  WebServerB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetB
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: WebServerB-NGINX
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          dnf update -y
+          dnf install -y nginx
+          systemctl enable nginx
+          systemctl start nginx
+          cat > /usr/share/nginx/html/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Alta Disponibilidad - Servidor B</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                background: linear-gradient(135deg, #1b5e20 0%, #388e3c 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .card {
+                background: white;
+                border-radius: 16px;
+                padding: 48px;
+                max-width: 560px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+              }
+              .badge {
+                background: #1b5e20;
+                color: white;
+                padding: 6px 20px;
+                border-radius: 20px;
+                font-size: 13px;
+                display: inline-block;
+                margin-bottom: 24px;
+              }
+              h1 { color: #1b5e20; font-size: 22px; margin-bottom: 12px; }
+              .server-name {
+                font-size: 52px;
+                font-weight: bold;
+                color: #388e3c;
+                margin: 16px 0;
+              }
+              .info { color: #444; margin: 8px 0; font-size: 15px; }
+              .tags { margin-top: 20px; }
+              .tag {
+                background: #e8f5e9;
+                color: #388e3c;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-size: 13px;
+                display: inline-block;
+                margin: 3px;
+              }
+              .footer {
+                margin-top: 32px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                color: #888;
+                font-size: 13px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">AWS CloudFormation</div>
+              <h1>Laboratorio de Alta Disponibilidad con NGINX</h1>
+              <div class="server-name">Servidor B</div>
+              <div class="info"><strong>Subnet:</strong> PublicSubnetB &mdash; <strong>AZ:</strong> Zona 2</div>
+              <div class="tags">
+                <span class="tag">t2.micro</span>
+                <span class="tag">Amazon Linux 2023</span>
+                <span class="tag">NGINX</span>
+                <span class="tag">Alta Disponibilidad</span>
+              </div>
+              <div class="footer">
+                Josue Perez &bull; Análisis y Diseño de Arquitecturas de Sistemas
+              </div>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+  WebServerC:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: WebServerC-NGINX
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          dnf update -y
+          dnf install -y nginx
+          systemctl enable nginx
+          systemctl start nginx
+          cat > /usr/share/nginx/html/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Alta Disponibilidad - Servidor C</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                background: linear-gradient(135deg, #4a148c 0%, #7b1fa2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .card {
+                background: white;
+                border-radius: 16px;
+                padding: 48px;
+                max-width: 560px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+              }
+              .badge {
+                background: #4a148c;
+                color: white;
+                padding: 6px 20px;
+                border-radius: 20px;
+                font-size: 13px;
+                display: inline-block;
+                margin-bottom: 24px;
+              }
+              h1 { color: #4a148c; font-size: 22px; margin-bottom: 12px; }
+              .server-name {
+                font-size: 52px;
+                font-weight: bold;
+                color: #7b1fa2;
+                margin: 16px 0;
+              }
+              .info { color: #444; margin: 8px 0; font-size: 15px; }
+              .tags { margin-top: 20px; }
+              .tag {
+                background: #f3e5f5;
+                color: #7b1fa2;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-size: 13px;
+                display: inline-block;
+                margin: 3px;
+              }
+              .footer {
+                margin-top: 32px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                color: #888;
+                font-size: 13px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">AWS CloudFormation</div>
+              <h1>Laboratorio de Alta Disponibilidad con NGINX</h1>
+              <div class="server-name">Servidor C</div>
+              <div class="info"><strong>Subnet:</strong> PublicSubnetA &mdash; <strong>AZ:</strong> Zona 1</div>
+              <div class="tags">
+                <span class="tag">t2.micro</span>
+                <span class="tag">Amazon Linux 2023</span>
+                <span class="tag">NGINX</span>
+                <span class="tag">Alta Disponibilidad</span>
+              </div>
+              <div class="footer">
+                Josue Perez &bull; Análisis y Diseño de Arquitecturas de Sistemas
+              </div>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+  WebServerD:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetB
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: WebServerD-NGINX
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          dnf update -y
+          dnf install -y nginx
+          systemctl enable nginx
+          systemctl start nginx
+          cat > /usr/share/nginx/html/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Alta Disponibilidad - Servidor D</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                background: linear-gradient(135deg, #b71c1c 0%, #e53935 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .card {
+                background: white;
+                border-radius: 16px;
+                padding: 48px;
+                max-width: 560px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+              }
+              .badge {
+                background: #b71c1c;
+                color: white;
+                padding: 6px 20px;
+                border-radius: 20px;
+                font-size: 13px;
+                display: inline-block;
+                margin-bottom: 24px;
+              }
+              h1 { color: #b71c1c; font-size: 22px; margin-bottom: 12px; }
+              .server-name {
+                font-size: 52px;
+                font-weight: bold;
+                color: #e53935;
+                margin: 16px 0;
+              }
+              .info { color: #444; margin: 8px 0; font-size: 15px; }
+              .tags { margin-top: 20px; }
+              .tag {
+                background: #ffebee;
+                color: #e53935;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-size: 13px;
+                display: inline-block;
+                margin: 3px;
+              }
+              .footer {
+                margin-top: 32px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                color: #888;
+                font-size: 13px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">AWS CloudFormation</div>
+              <h1>Laboratorio de Alta Disponibilidad con NGINX</h1>
+              <div class="server-name">Servidor D</div>
+              <div class="info"><strong>Subnet:</strong> PublicSubnetB &mdash; <strong>AZ:</strong> Zona 2</div>
+              <div class="tags">
+                <span class="tag">t2.micro</span>
+                <span class="tag">Amazon Linux 2023</span>
+                <span class="tag">NGINX</span>
+                <span class="tag">Alta Disponibilidad</span>
+              </div>
+              <div class="footer">
+                Josue Perez &bull; Análisis y Diseño de Arquitecturas de Sistemas
+              </div>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+  WebServerE:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: WebServerE-NGINX
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          dnf update -y
+          dnf install -y nginx
+          systemctl enable nginx
+          systemctl start nginx
+          cat > /usr/share/nginx/html/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Alta Disponibilidad - Servidor E</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                background: linear-gradient(135deg, #e65100 0%, #f57c00 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .card {
+                background: white;
+                border-radius: 16px;
+                padding: 48px;
+                max-width: 560px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+              }
+              .badge {
+                background: #e65100;
+                color: white;
+                padding: 6px 20px;
+                border-radius: 20px;
+                font-size: 13px;
+                display: inline-block;
+                margin-bottom: 24px;
+              }
+              h1 { color: #e65100; font-size: 22px; margin-bottom: 12px; }
+              .server-name {
+                font-size: 52px;
+                font-weight: bold;
+                color: #f57c00;
+                margin: 16px 0;
+              }
+              .info { color: #444; margin: 8px 0; font-size: 15px; }
+              .tags { margin-top: 20px; }
+              .tag {
+                background: #fff3e0;
+                color: #f57c00;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-size: 13px;
+                display: inline-block;
+                margin: 3px;
+              }
+              .footer {
+                margin-top: 32px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                color: #888;
+                font-size: 13px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">AWS CloudFormation</div>
+              <h1>Laboratorio de Alta Disponibilidad con NGINX</h1>
+              <div class="server-name">Servidor E</div>
+              <div class="info"><strong>Subnet:</strong> PublicSubnetA &mdash; <strong>AZ:</strong> Zona 1</div>
+              <div class="tags">
+                <span class="tag">t2.micro</span>
+                <span class="tag">Amazon Linux 2023</span>
+                <span class="tag">NGINX</span>
+                <span class="tag">Alta Disponibilidad</span>
+              </div>
+              <div class="footer">
+                Josue Perez &bull; Análisis y Diseño de Arquitecturas de Sistemas
+              </div>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+  # ─── LOAD BALANCER ────────────────────────────────────────────────────────
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: LabAltaDisponibilidadALB
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: LabAltaDisponibilidadALB
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: LabAltaDispTG
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref LabVPC
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+      Targets:
+        - Id: !Ref WebServerA
+          Port: 80
+        - Id: !Ref WebServerB
+          Port: 80
+        - Id: !Ref WebServerC
+          Port: 80
+        - Id: !Ref WebServerD
+          Port: 80
+        - Id: !Ref WebServerE
+          Port: 80
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+# ─── OUTPUTS ──────────────────────────────────────────────────────────────
+
+Outputs:
+  LoadBalancerDNS:
+    Description: "DNS publico del Load Balancer"
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  WebsiteURL:
+    Description: "URL del sitio web"
+    Value: !Sub "http://${ApplicationLoadBalancer.DNSName}"
+
+  InstanceAId:
+    Description: "ID de la instancia A (AZ 1)"
+    Value: !Ref WebServerA
+
+  InstanceBId:
+    Description: "ID de la instancia B (AZ 2)"
+    Value: !Ref WebServerB
+
+  InstanceCId:
+    Description: "ID de la instancia C (AZ 1)"
+    Value: !Ref WebServerC
+
+  InstanceDId:
+    Description: "ID de la instancia D (AZ 2)"
+    Value: !Ref WebServerD
+
+  InstanceEId:
+    Description: "ID de la instancia E (AZ 1)"
+    Value: !Ref WebServerE
